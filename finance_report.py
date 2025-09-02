@@ -1,128 +1,117 @@
-import os
 import requests
-import datetime
+import pandas as pd
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-# ========== 邮箱配置 ==========
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 import os
+import sys
+from datetime import datetime
 
-SENDER_EMAIL = os.getenv("EMAIL_USER")
-SENDER_PASSWORD = os.getenv("EMAIL_PASS")
-RECEIVER_EMAIL = os.getenv("EMAIL_RECEIVER")
-
-
-# ========== 获取数据 ==========
-def get_data():
-    # 免费API示例（可根据需要换更权威数据源）
+# ========== 获取金融新闻 ==========
+def fetch_news():
     try:
-        # 美元指数（示例接口）
-        dxy = requests.get("https://www.alphavantage.co/query?function=DOLLAR_INDEX&apikey=demo").json().get("value", 104.3)
-        # 人民币汇率
-        usd_cny = requests.get("https://api.exchangerate.host/latest?base=USD&symbols=CNY").json()["rates"]["CNY"]
-        # 股指示例（你可以换成真实数据API）
-        shanghai = 3150
-        hang_seng = 18500
-        sp500 = 5200
-        # 大宗商品示例
-        wti = 78.5
-        gold = 1940
-        # 债券收益率
-        cn10y = "2.55%"
-        us10y = "4.25%"
-        # PMI示例（固定数据，宏观数据每月更新）
-        manufacturing_pmi = 50.5
-        services_pmi = 52.1
-        M1 = "3.2%"
-        M2 = "8.5%"
-        
-        return {
-            "美元指数": round(dxy,2),
-            "人民币汇率": round(usd_cny,4),
-            "上证综指": shanghai,
-            "恒生指数": hang_seng,
-            "标普500": sp500,
-            "WTI原油": wti,
-            "黄金": gold,
-            "中国10年期国债": cn10y,
-            "美国10年期国债": us10y,
-            "制造业PMI": manufacturing_pmi,
-            "服务业PMI": services_pmi,
-            "M1": M1,
-            "M2": M2
+        url = "https://newsapi.org/v2/top-headlines"
+        params = {
+            "category": "business",
+            "language": "zh",
+            "apiKey": "demo"  # 需要你自己去 newsapi.org 注册一个免费 key
         }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        articles = data.get("articles", [])
+        news_list = []
+        for a in articles[:10]:  # 取前10条
+            news_list.append({
+                "title": a["title"],
+                "source": a["source"]["name"],
+                "url": a["url"]
+            })
+        return news_list
     except Exception as e:
-        print("⚠️ 获取数据失败:", e)
-        return {}
+        return [{"title": f"获取新闻失败: {e}", "source": "", "url": ""}]
 
-# ========== 生成日报 ==========
-def generate_report(data):
-    today = datetime.date.today().strftime("%Y/%m/%d")
-    report = f"""📊 每日金融数据简报（{today}）
+# ========== 生成解读 ==========
+def interpret_news(news_list):
+    interpretations = []
+    for n in news_list:
+        if "美联储" in n["title"]:
+            impact = "可能影响全球资金流向，利好新兴市场（包括中国股市）。"
+        elif "油价" in n["title"]:
+            impact = "油价波动会影响能源板块（中石油、中海油等）。"
+        elif "科技" in n["title"]:
+            impact = "科技政策或新闻可能影响半导体、人工智能板块。"
+        else:
+            impact = "整体影响中性，需要结合市场情绪。"
+        interpretations.append((n["title"], impact))
+    return interpretations
 
-1. 外汇 & 美元指数
-- 美元指数 DXY：{data.get('美元指数')}
-  🔎 美元走强，可能对人民币贬值造成压力
-- 人民币汇率 USD/CNY：{data.get('人民币汇率')}
-  🔎 人民币小幅波动，受美元走势影响
+# ========== 生成PDF ==========
+def generate_pdf(news_list, interpretations, filename):
+    doc = SimpleDocTemplate(filename, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
 
-2. 货币供应（最新月度）
-- M1 同比：{data.get('M1')}
-  🔎 企业短期资金活跃度一般
-- M2 同比：{data.get('M2')}
-  🔎 流动性宽松，政策偏稳健
+    story.append(Paragraph("📊 每日金融市场报告", styles["Title"]))
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    story.append(Spacer(1, 20))
 
-3. 宏观景气
-- 制造业 PMI：{data.get('制造业PMI')}
-  🔎 高于荣枯线，制造业保持扩张
-- 服务业 PMI：{data.get('服务业PMI')}
-  🔎 消费和服务业回暖
+    data = [["新闻标题", "解读及市场影响"]]
+    for (title, impact) in interpretations:
+        data.append([title, impact])
 
-4. 股指表现
-- 上证综指：{data.get('上证综指')}
-  🔎 政策推动下市场情绪改善
-- 恒生指数：{data.get('恒生指数')}
-  🔎 港股反弹，科技股带动
-- 标普500：{data.get('标普500')}
-  🔎 美股高位震荡，受利率预期影响
+    table = Table(data, colWidths=[250, 250])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
 
-5. 大宗商品
-- WTI 原油：{data.get('WTI原油')} 美元/桶
-  🔎 地缘风险推升油价
-- 黄金：{data.get('黄金')} 美元/盎司
-  🔎 避险需求上升
-
-6. 债券收益率
-- 中国10年期国债：{data.get('中国10年期国债')}
-  🔎 资金流入债市，避险情绪增强
-- 美国10年期国债：{data.get('美国10年期国债')}
-  🔎 利率预期分歧，美债波动
-"""
-    return report
+    story.append(table)
+    doc.build(story)
 
 # ========== 发送邮件 ==========
-def send_email(report):
+def send_email(pdf_file):
+    sender = os.environ["EMAIL_USER"]
+    password = os.environ["EMAIL_PASS"]
+    receiver = os.environ["EMAIL_RECEIVER"]
+
     msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = RECEIVER_EMAIL
-    msg['Subject'] = "每日金融数据简报"
-    msg.attach(MIMEText(report, 'plain', 'utf-8'))
-    try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
-        print("✅ 邮件已发送")
-    except Exception as e:
-        print("⚠️ 邮件发送失败:", e)
+    msg["From"] = sender
+    msg["To"] = receiver
+    msg["Subject"] = "每日金融市场报告"
+
+    msg.attach(MIMEText("您好，附件是今日的金融市场报告，请查收。", "plain", "utf-8"))
+
+    with open(pdf_file, "rb") as f:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(pdf_file)}")
+    msg.attach(part)
+
+    with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
+        server.login(sender, password)
+        server.send_message(msg)
 
 # ========== 主程序 ==========
-if __name__ == "__main__":
-    data = get_data()
-    if data:
-        report = generate_report(data)
-        send_email(report)
-    else:
-        print("⚠️ 无数据生成日报")
+def main(mode):
+    news = fetch_news()
+    interpretations = interpret_news(news)
 
+    pdf_file = f"report_{mode}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    generate_pdf(news, interpretations, pdf_file)
+    send_email(pdf_file)
+    print(f"{mode} 报告已生成并发送: {pdf_file}")
+
+if __name__ == "__main__":
+    mode = sys.argv[1] if len(sys.argv) > 1 else "daily"
+    main(mode)

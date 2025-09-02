@@ -6,9 +6,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ========== 邮箱配置 ==========
+import os
+
 SENDER_EMAIL = os.getenv("EMAIL_USER")
 SENDER_PASSWORD = os.getenv("EMAIL_PASS")
 RECEIVER_EMAIL = os.getenv("EMAIL_RECEIVER")
+
 
 # ========== 获取数据 ==========
 def get_data():
@@ -122,3 +125,4 @@ if __name__ == "__main__":
         send_email(report)
     else:
         print("⚠️ 无数据生成日报")
+

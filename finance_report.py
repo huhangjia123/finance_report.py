@@ -94,7 +94,7 @@ def send_email(report_type, receiver, sender, password, smtp_server="smtp.qq.com
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
       sender = sender.strip()
-password = password.strip()
+      password = password.strip()
 
         server.login(sender, password)
         server.send_message(msg)
@@ -113,4 +113,5 @@ if __name__ == "__main__":
     EMAIL_RECEIVER = "接收邮箱@qq.com"
 
     send_email(report_type, EMAIL_RECEIVER, EMAIL_USER, EMAIL_PASS)
+
 

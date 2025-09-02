@@ -1,0 +1,39 @@
+name: Finance Report
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # 每天早上9点跑日报
+    - cron: "0 10 * * 1"  # 每周一早上10点跑周报
+    - cron: "0 11 1 * *"  # 每月1号早上11点跑月报
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: pip install reportlab
+      - name: Run report
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            python finance_report.py daily
+          else
+            DAY=$(date +%d)
+            WEEKDAY=$(date +%u)
+            if [[ $WEEKDAY -eq 1 ]]; then
+              python finance_report.py weekly
+            elif [[ $DAY -eq 1 ]]; then
+              python finance_report.py monthly
+            else
+              python finance_report.py daily
+            fi
+          fi
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}

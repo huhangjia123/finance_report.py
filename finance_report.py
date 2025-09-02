@@ -1,117 +1,114 @@
 import requests
-import pandas as pd
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
 import smtplib
 from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
-from email import encoders
-import os
-import sys
 from datetime import datetime
 
-# ========== 获取金融新闻 ==========
-def fetch_news():
+# ===== 获取金融数据（示例：美元指数、黄金、A股指数、港股指数） =====
+def fetch_data():
+    data = {}
     try:
-        url = "https://newsapi.org/v2/top-headlines"
-        params = {
-            "category": "business",
-            "language": "zh",
-            "apiKey": "demo"  # 需要你自己去 newsapi.org 注册一个免费 key
-        }
-        r = requests.get(url, params=params, timeout=10)
-        data = r.json()
-        articles = data.get("articles", [])
-        news_list = []
-        for a in articles[:10]:  # 取前10条
-            news_list.append({
-                "title": a["title"],
-                "source": a["source"]["name"],
-                "url": a["url"]
-            })
-        return news_list
+        # 美元指数 (DXY) - 用 Yahoo API
+        dxy = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=DX-Y.NYB").json()
+        data["美元指数"] = dxy["quoteResponse"]["result"][0]["regularMarketPrice"]
+
+        # 黄金价格 (XAUUSD)
+        gold = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC=F").json()
+        data["黄金期货"] = gold["quoteResponse"]["result"][0]["regularMarketPrice"]
+
+        # 上证指数
+        sh = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=000001.SS").json()
+        data["上证指数"] = sh["quoteResponse"]["result"][0]["regularMarketPrice"]
+
+        # 恒生指数
+        hs = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=^HSI").json()
+        data["恒生指数"] = hs["quoteResponse"]["result"][0]["regularMarketPrice"]
+
     except Exception as e:
-        return [{"title": f"获取新闻失败: {e}", "source": "", "url": ""}]
+        data["error"] = str(e)
+    return data
 
-# ========== 生成解读 ==========
-def interpret_news(news_list):
-    interpretations = []
-    for n in news_list:
-        if "美联储" in n["title"]:
-            impact = "可能影响全球资金流向，利好新兴市场（包括中国股市）。"
-        elif "油价" in n["title"]:
-            impact = "油价波动会影响能源板块（中石油、中海油等）。"
-        elif "科技" in n["title"]:
-            impact = "科技政策或新闻可能影响半导体、人工智能板块。"
-        else:
-            impact = "整体影响中性，需要结合市场情绪。"
-        interpretations.append((n["title"], impact))
-    return interpretations
+# ===== 解读逻辑 =====
+def interpret(data):
+    insights = []
+    if "美元指数" in data and data["美元指数"] > 100:
+        insights.append("美元指数偏强 → 对人民币汇率和A股资金面可能形成压力。")
+    else:
+        insights.append("美元指数走弱 → 有利于资金回流新兴市场，利好A股和港股。")
 
-# ========== 生成PDF ==========
-def generate_pdf(news_list, interpretations, filename):
-    doc = SimpleDocTemplate(filename, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
+    if "黄金期货" in data and data["黄金期货"] > 2000:
+        insights.append("黄金价格高企 → 市场避险情绪较强，短期可能不利于股市。")
+    else:
+        insights.append("黄金下行 → 投资者风险偏好回升，利好股市。")
 
-    story.append(Paragraph("📊 每日金融市场报告", styles["Title"]))
-    story.append(Spacer(1, 20))
-    story.append(Paragraph(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
-    story.append(Spacer(1, 20))
+    if "上证指数" in data and data["上证指数"] < 3000:
+        insights.append("上证指数低位运行 → 市场信心不足，但可能存在价值机会。")
+    else:
+        insights.append("上证指数稳健 → A股整体市场环境偏积极。")
 
-    data = [["新闻标题", "解读及市场影响"]]
-    for (title, impact) in interpretations:
-        data.append([title, impact])
+    if "恒生指数" in data and data["恒生指数"] < 18000:
+        insights.append("恒生指数承压 → 港股流动性不足，需要关注外资动向。")
+    else:
+        insights.append("恒生指数企稳 → 港股有望出现结构性机会。")
 
-    table = Table(data, colWidths=[250, 250])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-    ]))
+    return insights
 
-    story.append(table)
-    doc.build(story)
+# ===== 生成 HTML 报告 =====
+def generate_report(report_type):
+    data = fetch_data()
+    insights = interpret(data)
 
-# ========== 发送邮件 ==========
-def send_email(pdf_file):
-    sender = os.environ["EMAIL_USER"]
-    password = os.environ["EMAIL_PASS"]
-    receiver = os.environ["EMAIL_RECEIVER"]
+    today = datetime.now().strftime("%Y-%m-%d %H:%M")
+    html = f"""
+    <html>
+      <body>
+        <h2>{report_type.capitalize()} 投资报告 ({today})</h2>
+        <h3>📊 市场数据</h3>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+          <tr><th>指标</th><th>数值</th></tr>
+    """
 
-    msg = MIMEMultipart()
+    for key, value in data.items():
+        if key != "error":
+            html += f"<tr><td>{key}</td><td>{value}</td></tr>"
+
+    html += """
+        </table>
+        <h3>📌 解读</h3>
+        <ul>
+    """
+    for ins in insights:
+        html += f"<li>{ins}</li>"
+
+    html += """
+        </ul>
+      </body>
+    </html>
+    """
+    return html
+
+# ===== 发送邮件 =====
+def send_email(report_type, receiver, sender, password):
+    report_html = generate_report(report_type)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"📈 {report_type.capitalize()} 投资报告"
     msg["From"] = sender
     msg["To"] = receiver
-    msg["Subject"] = "每日金融市场报告"
 
-    msg.attach(MIMEText("您好，附件是今日的金融市场报告，请查收。", "plain", "utf-8"))
-
-    with open(pdf_file, "rb") as f:
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(f.read())
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(pdf_file)}")
-    msg.attach(part)
+    msg.attach(MIMEText(report_html, "html", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
         server.login(sender, password)
-        server.send_message(msg)
+        server.sendmail(sender, receiver, msg.as_string())
 
-# ========== 主程序 ==========
-def main(mode):
-    news = fetch_news()
-    interpretations = interpret_news(news)
-
-    pdf_file = f"report_{mode}_{datetime.now().strftime('%Y%m%d')}.pdf"
-    generate_pdf(news, interpretations, pdf_file)
-    send_email(pdf_file)
-    print(f"{mode} 报告已生成并发送: {pdf_file}")
-
+# ===== 主程序入口 =====
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "daily"
-    main(mode)
+    import sys
+    report_type = sys.argv[1] if len(sys.argv) > 1 else "daily"
+
+    EMAIL_USER = os.getenv("EMAIL_USER")
+    EMAIL_PASS = os.getenv("EMAIL_PASS")
+    EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
+
+    send_email(report_type, EMAIL_RECEIVER, EMAIL_USER, EMAIL_PASS)

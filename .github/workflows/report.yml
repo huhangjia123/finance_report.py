@@ -1,5 +1,4 @@
-name: Daily Economy Data Report
-
+name: finance_report
 on:
   schedule:
     # 每天 UTC 时间 00:30 运行 (即北京时间 08:30)

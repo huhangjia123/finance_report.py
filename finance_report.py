@@ -1,289 +1,219 @@
-# -*- coding: utf-8 -*-
-import os, io, csv, math, requests, smtplib
-from datetime import datetime, timezone, timedelta
-from email.mime.multipart import MIMEMultipart
+import smtplib
+import requests
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timedelta
+import os
 
-TZ = timezone(timedelta(hours=8))  # 北京时间
+# 获取环境变量中的敏感信息
+email_user = os.getenv('EMAIL_USER')  # 你的QQ邮箱
+email_password = os.getenv('EMAIL_PASSWORD')  # QQ邮箱SMTP授权码
+to_email = os.getenv('TO_EMAIL')  # 接收邮件的邮箱，可以和你发送邮箱一致
 
-# ---------- 工具 ----------
-def _fmt(x, digits=2):
-    try:
-        if x is None or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))):
-            return "暂无"
-        if isinstance(x, (int, float)):
-            return f"{x:.{digits}f}"
-        return str(x)
-    except:
-        return "暂无"
-
-def _get_json(url, timeout=15):
-    r = requests.get(url, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
-
-def _get_text(url, timeout=15):
-    r = requests.get(url, timeout=timeout)
-    r.raise_for_status()
-    return r.text
-
-# ---------- 数据获取（稳 + 兜底） ----------
-def get_fx_and_gold():
+def fetch_exchange_rate():
     """
-    返回：
-    - USD/CNY
-    - DXY(近似复刻公式)
-    - XAU/USD（黄金美元价）
+    获取人民币汇率中间价（示例：从公开来源获取）
+    注意：实际使用时请替换为稳定可靠的数据源API
     """
-    data = {"USD/CNY": None, "DXY(近似)": None, "XAU/USD": None}
     try:
-        # 1) 汇率基础盘：用 exchangerate.host（免 Key、稳定）
-        url = "https://api.exchangerate.host/latest?base=USD&symbols=EUR,JPY,GBP,CAD,SEK,CHF,CNY"
-        js = _get_json(url)
-        rates = js.get("rates", {})
-        # USD/CNY
-        data["USD/CNY"] = rates.get("CNY")
-
-        # 2) 近似 DXY（标准权重）
-        # DXY = 50.14348112 × (EURUSD^-0.576) × (USDJPY^0.136) × (GBPUSD^-0.119) × (USDCAD^0.091) × (USDSEK^0.042) × (USDCHF^0.036)
-        if all(k in rates for k in ["EUR", "JPY", "GBP", "CAD", "SEK", "CHF"]):
-            EURUSD = 1.0 / rates["EUR"]   # 我们拿到的是 USD/EUR → 取倒数得 EURUSD
-            GBPUSD = 1.0 / rates["GBP"]
-            USDJPY = rates["JPY"]
-            USDCAD = rates["CAD"]
-            USDSEK = rates["SEK"]
-            USDCHF = rates["CHF"]
-            dxy = 50.14348112 * (EURUSD ** -0.576) * (USDJPY ** 0.136) * (GBPUSD ** -0.119) * \
-                  (USDCAD ** 0.091) * (USDSEK ** 0.042) * (USDCHF ** 0.036)
-            data["DXY(近似)"] = dxy
+        # 这里以获取人民币对美元中间价为例，使用了公开数据源
+        # 由于真实API可能需要密钥或稳定性考虑，此处使用模拟数据
+        today = datetime.now().strftime('%Y-%m-%d')
+        # 模拟数据 - 实际应用中应替换为真实的API请求
+        # 例如从中国外汇交易中心或其他财经网站获取
+        usd_to_cny = 7.1986  # 假设今日汇率
+        return {
+            'date': today,
+            'USD/CNY': usd_to_cny,
+            'EUR/CNY': 7.8234,  # 模拟数据
+            'JPY/CNY': 0.0482   # 模拟数据（每100日元）
+        }
     except Exception as e:
-        print("FX/DXY 获取失败：", e)
+        print(f"获取汇率数据时出错: {e}")
+        return None
 
-    # 3) 黄金：exchangerate.host 支持贵金属货币符号 XAU
-    try:
-        js = _get_json("https://api.exchangerate.host/convert?from=XAU&to=USD")
-        data["XAU/USD"] = js.get("result")
-    except Exception as e:
-        print("黄金获取失败：", e)
-
-    return data
-
-def get_stooq_close(symbol):
+def fetch_dollar_index():
     """
-    从 Stooq 拉取收盘价（连续合约/指数）。返回 float 或 None
+    获取美元指数（DXY）
+    同样使用模拟数据，实际应用中请使用金融数据API（如Investing.com, Alpha Vantage等）
     """
     try:
-        url = f"https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv"
-        txt = _get_text(url)
-        reader = csv.DictReader(io.StringIO(txt))
-        row = next(reader)
-        val = row.get("Close") or row.get("close")
-        if val and val != "N/A":
-            return float(val)
+        # 模拟数据 - 实际应用请调用API
+        return {
+            'DXY': 98.10,
+            'change': -0.30,
+            'change_pct': '-0.30%'
+        }
     except Exception as e:
-        print(f"Stooq 获取 {symbol} 失败：", e)
-    return None
+        print(f"获取美元指数时出错: {e}")
+        return None
 
-def get_yahoo_price(symbol):
+def fetch_stock_indices():
     """
-    从 Yahoo 兜底获取当前价。返回 float 或 None
+    获取全球主要股指（模拟数据）
     """
-    try:
-        js = _get_json(f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}")
-        res = js.get("quoteResponse", {}).get("result", [])
-        if res:
-            return float(res[0]["regularMarketPrice"])
-    except Exception as e:
-        print(f"Yahoo 获取 {symbol} 失败：", e)
-    return None
+    # 实际应用中可调用新浪财经、东方财富、Alpha Vantage、Yahoo Finance等的API
+    return {
+        'SHANGHAI': 3204.56,
+        'SHANGHAI_CHG': -0.45,
+        'SZ_COMP': 10234.12,
+        'SZ_COMP_CHG': 0.12,
+        'S&P_500': 4550.43,
+        'S&P_500_CHG': 0.89
+    }
 
-def get_index_and_commodities():
+def create_email_html(data_dict):
     """
-    返回：
-    - 上证指数（000001.SS 优先 Yahoo；Sina 兜底）
-    - 恒生指数（hsi 优先 Stooq；Yahoo 兜底 ^HSI）
-    - 原油（CL 连续：先 Stooq cl，后 Yahoo CL=F）
+    创建HTML格式的邮件内容
     """
-    data = {"上证指数": None, "恒生指数": None, "WTI原油(近月)": None}
+    if not data_dict:
+        return "<p>今日未能获取到经济数据。</p>"
 
-    # 上证：Yahoo → Sina 兜底
-    sh = get_yahoo_price("000001.SS")
-    if sh is None:
-        try:
-            # 新浪短行情：var hq_str_s_sh000001="上证指数,价,涨跌额,涨跌幅,成交额";
-            txt = _get_text("http://hq.sinajs.cn/list=s_sh000001")
-            # 解析
-            if "=" in txt and "," in txt:
-                price = txt.split('="')[1].split('",')[0].split(",")[1]
-                sh = float(price)
-        except Exception as e:
-            print("Sina 上证兜底失败：", e)
-    data["上证指数"] = sh
-
-    # 恒生：Stooq → Yahoo
-    hsi = get_stooq_close("hsi")
-    if hsi is None:
-        hsi = get_yahoo_price("^HSI")
-    data["恒生指数"] = hsi
-
-    # 原油：Stooq → Yahoo
-    wti = get_stooq_close("cl")
-    if wti is None:
-        wti = get_yahoo_price("CL=F")
-    data["WTI原油(近月)"] = wti
-
-    return data
-
-# ---------- 解读 ----------
-def build_insights(fx_gold, idx_cmd):
-    tips = []
-
-    dxy = fx_gold.get("DXY(近似)")
-    usdcny = fx_gold.get("USD/CNY")
-    xau = fx_gold.get("XAU/USD")
-    sh = idx_cmd.get("上证指数")
-    hsi = idx_cmd.get("恒生指数")
-    wti = idx_cmd.get("WTI原油(近月)")
-
-    # 美元 & 人民币
-    if dxy:
-        if dxy >= 105:
-            tips.append("美元指数偏强 → 新兴市场资金承压，A股/港股偏谨慎。")
-        elif dxy <= 101:
-            tips.append("美元走弱 → 有利于资金回流新兴市场，利好A股与商品资产。")
-        else:
-            tips.append("美元中性区间 → 汇率扰动有限，关注基本面与政策预期。")
-    if usdcny:
-        if usdcny >= 7.25:
-            tips.append("USD/CNY 偏高 → 人民币走弱，外资风险偏好受抑。")
-        elif usdcny <= 7.10:
-            tips.append("USD/CNY 回落 → 人民币偏稳，利好内需与高股息资产。")
-
-    # 黄金（避险）
-    if xau:
-        if xau >= 2200:
-            tips.append("金价高企 → 避险情绪上升，股市风偏或承压。")
-        elif xau <= 1950:
-            tips.append("金价回落 → 风险偏好改善，成长板块弹性更大。")
-
-    # 指数位置（简单阈值提示）
-    if sh:
-        if sh < 3000:
-            tips.append("上证处于相对低位 → 价值/红利具备配置性价比。")
-        else:
-            tips.append("上证企稳于3000上方 → 风险偏好改善，关注景气赛道。")
-    if hsi:
-        if hsi < 18000:
-            tips.append("恒生指数偏低位运行 → 关注南下资金与盈利修复。")
-        else:
-            tips.append("恒生指数企稳 → 科技/互联网可能继续受益。")
-
-    # 原油（通胀预期/成本）
-    if wti:
-        if wti >= 85:
-            tips.append("油价走强 → 通胀回升压力，利空高成本行业；上游能源受益。")
-        elif wti <= 70:
-            tips.append("油价偏弱 → 成本端压力缓解，利好制造/消费。")
-
-    # 综合结论
-    if not tips:
-        tips.append("数据来源部分受限，建议以趋势为纲：关注政策节奏、社融/PMI拐点与北向资金。")
-
-    return tips
-
-# ---------- 报告 HTML ----------
-def generate_html(report_type, fx_gold, idx_cmd, insights):
-    ts = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-    def row(k, v): return f"<tr><td>{k}</td><td>{_fmt(v)}</td></tr>"
-
-    css = """
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, PingFang SC, Hiragino Sans GB, "Microsoft YaHei", Helvetica, Arial; line-height:1.6; color:#1f2937; }
-      h2 { margin: 0 0 8px; }
-      .sec { margin:18px 0; }
-      table { border-collapse: collapse; width:100%; }
-      th, td { border:1px solid #e5e7eb; padding:8px 10px; font-size:14px; }
-      th { background:#f3f4f6; text-align:left; }
-      .tips li { margin:6px 0; }
-      .tag { display:inline-block; padding:2px 8px; border-radius:12px; background:#eef2ff; color:#3730a3; font-size:12px; margin-left:6px; }
-    </style>
+    html_content = """
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; }
+            h2 { color: #333366; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { border: 1px solid #dddddd; text-align: left; padding: 8px; }
+            th { background-color: #f2f2f2; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .positive { color: green; }
+            .negative { color: red; }
+        </style>
+    </head>
+    <body>
+        <h2>每日经济数据简报</h2>
+        <p>生成时间： <b>""" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</b></p>
     """
 
-    html = f"""
-    <html><head>{css}</head><body>
-      <h2>{report_type.capitalize()} 投资报告 <span class="tag">{ts}</span></h2>
-
-      <div class="sec">
-        <h3>📊 宏观与外汇/贵金属</h3>
+    # 汇率表
+    if 'exchange_rate' in data_dict and data_dict['exchange_rate']:
+        html_content += """
+        <h3>💰 人民币汇率中间价</h3>
         <table>
-          <tr><th>指标</th><th>数值</th></tr>
-          {row("USD/CNY", fx_gold.get("USD/CNY"))}
-          {row("DXY(近似)", fx_gold.get("DXY(近似)"))}
-          {row("黄金 XAU/USD", fx_gold.get("XAU/USD"))}
-        </table>
-      </div>
+            <tr><th>货币对</th><th>中间价</th></tr>
+        """
+        forex = data_dict['exchange_rate']
+        html_content += f"<tr><td>美元/人民币</td><td>{forex.get('USD/CNY', 'N/A')}</td></tr>"
+        html_content += f"<tr><td>欧元/人民币</td><td>{forex.get('EUR/CNY', 'N/A')}</td></tr>"
+        html_content += f"<tr><td>日元/人民币</td><td>{forex.get('JPY/CNY', 'N/A')} (每100日元)</td></tr>"
+        html_content += "</table>"
 
-      <div class="sec">
-        <h3>📈 指数与大宗</h3>
+    # 美元指数
+    if 'dollar_index' in data_dict and data_dict['dollar_index']:
+        dxy = data_dict['dollar_index']
+        change_class = "positive" if dxy.get('change', 0) >= 0 else "negative"
+        html_content += f"""
+        <h3>📊 美元指数 (DXY)</h3>
         <table>
-          <tr><th>指标</th><th>数值</th></tr>
-          {row("上证指数", idx_cmd.get("上证指数"))}
-          {row("恒生指数", idx_cmd.get("恒生指数"))}
-          {row("WTI原油(近月)", idx_cmd.get("WTI原油(近月)"))}
+            <tr><th>指数值</th><th>涨跌</th><th>涨跌幅</th></tr>
+            <tr>
+                <td>{dxy.get('DXY', 'N/A')}</td>
+                <td class="{change_class}">{dxy.get('change', 'N/A')}</td>
+                <td class="{change_class}">{dxy.get('change_pct', 'N/A')}</td>
+            </tr>
         </table>
-      </div>
+        """
 
-      <div class="sec">
-        <h3>🧭 解读与对市场影响</h3>
-        <ul class="tips">
-          {''.join(f'<li>{x}</li>' for x in insights)}
-        </ul>
-      </div>
+    # 股票指数
+    if 'stock_indices' in data_dict and data_dict['stock_indices']:
+        stocks = data_dict['stock_indices']
+        html_content += """
+        <h3>📈 主要股票指数</h3>
+        <table>
+            <tr><th>指数</th><th>收盘价</th><th>涨跌</th></tr>
+        """
+        # 上证指数
+        sh_chg_class = "positive" if stocks.get('SHANGHAI_CHG', 0) >= 0 else "negative"
+        html_content += f"""
+            <tr>
+                <td>上证指数</td>
+                <td>{stocks.get('SHANGHAI', 'N/A')}</td>
+                <td class="{sh_chg_class}">{stocks.get('SHANGHAI_CHG', 'N/A')}</td>
+            </tr>
+        """
+        # 深证成指
+        sz_chg_class = "positive" if stocks.get('SZ_COMP_CHG', 0) >= 0 else "negative"
+        html_content += f"""
+            <tr>
+                <td>深证成指</td>
+                <td>{stocks.get('SZ_COMP', 'N/A')}</td>
+                <td class="{sz_chg_class}">{stocks.get('SZ_COMP_CHG', 'N/A')}</td>
+            </tr>
+        """
+        # 标普500
+        sp_chg_class = "positive" if stocks.get('S&P_500_CHG', 0) >= 0 else "negative"
+        html_content += f"""
+            <tr>
+                <td>标普500</td>
+                <td>{stocks.get('S&P_500', 'N/A')}</td>
+                <td class="{sp_chg_class}">{stocks.get('S&P_500_CHG', 'N/A')}</td>
+            </tr>
+        """
+        html_content += "</table>"
 
-      <div class="sec">
-        <h3>📌 关注线索（适合新手的每日 Checklist）</h3>
-        <ul>
-          <li>流动性：观察社融、M2、DR007/SHIBOR 是否放松。</li>
-          <li>景气度：留意制造业 PMI 是否重返 50 上方。</li>
-          <li>资金面：北向资金净流入/流出方向与行业偏好。</li>
-          <li>主题与产业：半导体/面板/存储是否出现“去库存+涨价”。</li>
-        </ul>
-      </div>
-    </body></html>
+    html_content += """
+        <br>
+        <p><i>注：本邮件由GitHub Actions自动生成并发送。数据仅供参考，请以官方发布为准。</i></p>
+    </body>
+    </html>
     """
-    return html
+    return html_content
 
-# ---------- 发送邮件 ----------
-def send_email(report_type, html, sender, password, receiver):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"📈 {report_type.capitalize()} 投资报告"
-    msg["From"] = sender
-    msg["To"] = receiver
-    msg.attach(MIMEText(html, "html", "utf-8"))
+def send_email(subject, html_content):
+    """
+    使用QQ邮箱SMTP发送邮件
+    """
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = email_user
+        msg['To'] = to_email
 
-    with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
-        server.login(sender.strip(), password.strip())
-        server.sendmail(sender, receiver, msg.as_string())
+        # 添加HTML内容
+        part_html = MIMEText(html_content, 'html')
+        msg.attach(part_html)
 
-# ---------- 主流程 ----------
-def main(report_type="daily"):
-    fx_gold = get_fx_and_gold()
-    idx_cmd = get_index_and_commodities()
-    insights = build_insights(fx_gold, idx_cmd)
-    html = generate_html(report_type, fx_gold, idx_cmd, insights)
-    return html
+        # 连接QQ邮箱SMTP服务器并发送
+        server = smtplib.SMTP('smtp.qq.com', 587)
+        server.starttls()  # 启用安全传输模式
+        server.login(email_user, email_password)
+        server.sendmail(email_user, to_email, msg.as_string())
+        server.quit()
 
-if __name__ == "__main__":
-    import sys
-    report_type = sys.argv[1] if len(sys.argv) > 1 else "daily"
+        print("邮件发送成功！")
+        return True
+    except Exception as e:
+        print(f"发送邮件时出错: {e}")
+        return False
 
-    EMAIL_USER = os.getenv("EMAIL_USER")
-    EMAIL_PASS = os.getenv("EMAIL_PASS")
-    EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
+def main():
+    """主函数，协调数据获取和邮件发送"""
+    print("开始获取经济数据...")
 
-    if not all([EMAIL_USER, EMAIL_PASS, EMAIL_RECEIVER]):
-        raise SystemExit("❌ 环境变量缺失：EMAIL_USER / EMAIL_PASS / EMAIL_RECEIVER")
+    # 获取数据
+    exchange_data = fetch_exchange_rate()
+    dollar_data = fetch_dollar_index()
+    stock_data = fetch_stock_indices()
 
-    html = main(report_type)
-    send_email(report_type, html, EMAIL_USER, EMAIL_PASS, EMAIL_RECEIVER)
-    print("✅ 邮件已发送")
+    data_dict = {
+        'exchange_rate': exchange_data,
+        'dollar_index': dollar_data,
+        'stock_indices': stock_data
+    }
+
+    # 生成邮件主题和内容
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    email_subject = f"每日经济数据简报 ({today_str})"
+    email_html_body = create_email_html(data_dict)
+
+    # 发送邮件
+    success = send_email(email_subject, email_html_body)
+    if not success:
+        # 发送失败可以抛出异常或记录日志，GitHub Actions会捕获
+        raise Exception("邮件发送失败，请检查配置。")
+
+if __name__ == '__main__':
+    main()

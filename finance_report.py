@@ -1,18 +1,19 @@
+import os
 import requests
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 
-# ===== 获取金融数据（示例：美元指数、黄金、A股指数、港股指数） =====
+# ===== 获取金融数据 =====
 def fetch_data():
     data = {}
     try:
-        # 美元指数 (DXY) - 用 Yahoo API
+        # 美元指数
         dxy = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=DX-Y.NYB").json()
         data["美元指数"] = dxy["quoteResponse"]["result"][0]["regularMarketPrice"]
 
-        # 黄金价格 (XAUUSD)
+        # 黄金价格
         gold = requests.get("https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC=F").json()
         data["黄金期货"] = gold["quoteResponse"]["result"][0]["regularMarketPrice"]
 
